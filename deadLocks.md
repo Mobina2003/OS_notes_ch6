@@ -82,3 +82,105 @@ new Thread(() ->
 - **System Design**: Timeouts, deadlock detection algorithms
 
 Deadlocks violate liveness because the system loses its ability to make forward progress despite having all necessary resources and active participants – essentially "frozen in time" while appearing operationally ready.
+
+Here's a C implementation that fixes the deadlock using lock ordering with unique account IDs:
+
+```c
+#include <pthread.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+typedef struct {
+    int balance;
+    pthread_mutex_t lock;
+    long id;  // Unique ID for ordering
+} Account;
+
+// Create account with initial balance and ID
+Account* create_account(int initial_balance, long id) {
+    Account* acc = malloc(sizeof(Account));
+    acc->balance = initial_balance;
+    acc->id = id;
+    pthread_mutex_init(&acc->lock, NULL);
+    return acc;
+}
+
+// Transfer money between accounts (deadlock-free)
+void transfer(Account* from, Account* to, int amount) {
+    // Determine locking order based on ID
+    Account* first = from;
+    Account* second = to;
+    if (from->id > to->id) {
+        first = to;
+        second = from;
+    }
+
+    // Lock in consistent order
+    pthread_mutex_lock(&first->lock);
+    pthread_mutex_lock(&second->lock);
+    
+    // Perform transfer
+    if (from->balance >= amount) {
+        from->balance -= amount;
+        to->balance += amount;
+        printf("Transferred $%d from %ld to %ld\n", amount, from->id, to->id);
+    } else {
+        printf("Insufficient funds in %ld\n", from->id);
+    }
+    
+    // Unlock in reverse order
+    pthread_mutex_unlock(&second->lock);
+    pthread_mutex_unlock(&first->lock);
+}
+
+// Example usage
+int main() {
+    Account* acc1 = create_account(1000, 1);
+    Account* acc2 = create_account(1000, 2);
+    
+    // Transfer from acc1 to acc2
+    transfer(acc1, acc2, 500);
+    
+    // Transfer from acc2 to acc1
+    transfer(acc2, acc1, 200);
+    
+    printf("Final balances:\n");
+    printf("Account %ld: $%d\n", acc1->id, acc1->balance);
+    printf("Account %ld: $%d\n", acc2->id, acc2->balance);
+    
+    // Cleanup
+    pthread_mutex_destroy(&acc1->lock);
+    pthread_mutex_destroy(&acc2->lock);
+    free(acc1);
+    free(acc2);
+    
+    return 0;
+}
+```
+
+Key deadlock prevention techniques used:
+
+1. **Lock Ordering**:
+   - Accounts are always locked in ascending ID order
+   - Breaks circular wait condition
+   - Ensures consistent locking sequence globally
+
+2. **Consistent Lock Acquisition**:
+   ```c
+   if (from->id > to->id) {
+       first = to;
+       second = from;
+   }
+   ```
+   This guarantees the lock with smaller ID is always acquired first
+
+3. **Safe Unlocking**:
+   ```c
+   pthread_mutex_unlock(&second->lock);
+   pthread_mutex_unlock(&first->lock);
+   ```
+   Unlocks in reverse order (though unlock order doesn't cause deadlocks)
+
+4. **Error Handling**:
+   - Actual production code should check mutex lock/unlock return values
+   - Addressed here with simple print statements for clarity
